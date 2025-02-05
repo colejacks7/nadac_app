@@ -4,13 +4,14 @@ import streamlit as st
 def process_files_with_adjusted_filtering(top_100_data, nadac_data, reimbursement_data):
     """
     Process the Top 100, NADAC, and reimbursement files to generate a final output file.
-    Includes adjusted filtering logic for missing network values and additional error handling.
+    Adjusts filtering logic to use (Reimbursement Amount / Dispensed Quantity).
     """
+
     # Ensure required columns exist
     required_columns = {
         "Top 100": ["NDC", "Drug"],
         "NADAC": ["NDC", "NADAC Per Unit"],
-        "Reimbursement": ["Dispensed Item NDC", "Primary Remit Amount"]
+        "Reimbursement": ["Dispensed Item NDC", "Primary Remit Amount", "Dispensed Quantity"]
     }
 
     for file_name, columns in required_columns.items():
@@ -33,7 +34,12 @@ def process_files_with_adjusted_filtering(top_100_data, nadac_data, reimbursemen
     # Filter out rows with invalid remit amounts but allow missing network values
     valid_reimbursement_data = reimbursement_data[
         reimbursement_data["Primary Remit Amount"].fillna(0) > 0
-    ]
+    ].copy()
+
+    # Compute reimbursement per unit (Reimbursement Amount / Dispensed Quantity)
+    valid_reimbursement_data["Reimbursement Per Unit"] = (
+        valid_reimbursement_data["Primary Remit Amount"] / valid_reimbursement_data["Dispensed Quantity"]
+    )
 
     # Create a lookup dictionary for NADAC prices
     nadac_lookup = nadac_data.set_index("NDC")["NADAC Per Unit"].to_dict()
@@ -52,17 +58,19 @@ def process_files_with_adjusted_filtering(top_100_data, nadac_data, reimbursemen
         # Lookup reimbursement data
         reimbursement_match = valid_reimbursement_data[valid_reimbursement_data["Dispensed Item NDC"] == ndc]
         if not reimbursement_match.empty:
-            # Take the row with the highest Primary Remit Amount
-            best_match = reimbursement_match.sort_values(by="Primary Remit Amount", ascending=False).iloc[0]
+            # Take the row with the highest (Reimbursement Amount / Dispensed Quantity)
+            best_match = reimbursement_match.sort_values(by="Reimbursement Per Unit", ascending=False).iloc[0]
             bin_code = best_match.get("Primary Third Party Bin", "Not Available")
             pcn = best_match.get("Primary Third Party PCN", "Not Available")
             network = best_match.get("Primary Network Reimbursement", "Not Available")
             reimbursement = best_match.get("Primary Remit Amount", 0.0)
+            reimbursement_per_unit = best_match["Reimbursement Per Unit"]
         else:
             bin_code = "Not Available"
             pcn = "Not Available"
             network = "Not Available"
             reimbursement = 0.0
+            reimbursement_per_unit = 0.0
 
         # Append the row to output
         output_rows.append({
@@ -73,6 +81,7 @@ def process_files_with_adjusted_filtering(top_100_data, nadac_data, reimbursemen
             "PCN": pcn,
             "Network": network,
             "Reimbursement": reimbursement,
+            "Reimbursement Per Unit": reimbursement_per_unit,  # New column for clarity
             "Price": None,  # Blank Price column
         })
 
